@@ -8,11 +8,11 @@ fi
 
 TARGET_DIR="$1"
 
-# Create directories for organization
-mkdir -p "$TARGET_DIR/img"
-mkdir -p "$TARGET_DIR/vid"
-mkdir -p "$TARGET_DIR/doc"
-mkdir -p "$TARGET_DIR/arc"
+# Create directories for organization if they don't already exist
+[ ! -d "$TARGET_DIR/img" ] && mkdir -p "$TARGET_DIR/img"
+[ ! -d "$TARGET_DIR/vid" ] && mkdir -p "$TARGET_DIR/vid"
+[ ! -d "$TARGET_DIR/doc" ] && mkdir -p "$TARGET_DIR/doc"
+[ ! -d "$TARGET_DIR/arc" ] && mkdir -p "$TARGET_DIR/arc"
 
 # Move image files
 mv "$TARGET_DIR"/*.png "$TARGET_DIR/img/" 2>/dev/null
