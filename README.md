@@ -38,6 +38,12 @@ You can now run the script by providing the target directory as an argument. For
 ## Customization
 You can modify the file types and directories in the script as needed based on your specific requirements.
 
+## Change LOG
+- Added more file extensions (add yours if they are missing)
+
+## TODO:
+- Refine the script to accept arguments that facilitate recursive action
+
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
