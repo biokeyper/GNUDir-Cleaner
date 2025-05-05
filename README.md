@@ -24,7 +24,8 @@ This script automates the process of organizing files in a specified directory i
 
 ### 1. Clone this Repository
 ```bash
-git clone git@github.com:biokeyper/GNUDir-Cleaner.git`
+git clone git@github.com:biokeyper/GNUDir-Cleaner.git
+```
 
 ## 2 Navigate to `GNUDir-Cleaner` Directory
 `cd GNUDir-Cleaner`
