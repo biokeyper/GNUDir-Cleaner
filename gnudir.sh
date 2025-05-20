@@ -72,6 +72,25 @@ END_TIME=$(date +%s)
 echo "Application packages moved in $((END_TIME - START_TIME)) seconds."
 
 
+
+# Remove empty directories (excluding the main target and its main subfolders)
+echo "Deleting empty directories..."
+START_TIME=$(date +%s)
+find "$TARGET_DIR" -type d -empty \
+    -not -path "$TARGET_DIR" \
+    -not -path "$TARGET_DIR/img" \
+    -not -path "$TARGET_DIR/vid" \
+    -not -path "$TARGET_DIR/doc" \
+    -not -path "$TARGET_DIR/arc" \
+    -not -path "$TARGET_DIR/audio" \
+    -not -path "$TARGET_DIR/apps" \
+    -delete
+END_TIME=$(date +%s)
+echo "Empty directories deleted in $((END_TIME - START_TIME)) seconds."
+
+# echo "Organization complete in directory: $TARGET_DIR in $TOTAL_RUNTIME seconds."
+
+
 # Calculate total runtime
 TOTAL_END_TIME=$(date +%s)
 TOTAL_RUNTIME=$((TOTAL_END_TIME - TOTAL_START_TIME))
