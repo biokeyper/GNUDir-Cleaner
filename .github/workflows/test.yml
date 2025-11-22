@@ -1,4 +1,5 @@
 name: Test
+name: Test
 
 on:
   push:
@@ -11,11 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up
+      - name: Make scripts executable
         run: |
           chmod +x ./gnudir.sh
-          chmod +x ./tests/make_test_tree.sh ./tests/run_tests.sh
-      - name: Run tests
+          chmod +x ./tests/*.sh
+      - name: Run test suite
         run: |
-          chmod +x ./tests/test_suite.sh
           ./tests/test_suite.sh
+      - name: Run docs batching test
+        run: |
+          ./tests/test_docs_batch.sh

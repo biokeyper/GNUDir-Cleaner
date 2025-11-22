@@ -27,6 +27,7 @@ Options:
   --backup-mode MODE   Collision handling: numbered|timestamp|overwrite|skip (default: numbered)
   --exclude PATH       Exclude path (may be used multiple times)
   --keep-empty         Do not delete empty directories after organizing
+    --docs-batch-size N   Batch documents into subfolders of N files (default: 0 = disabled)
   --help               Show this help
 
 Example:
@@ -61,6 +62,12 @@ fi
 
 TARGET_DIR=${ARGS[0]}
 
+# validate docs batch size is a non-negative integer
+if ! printf '%s' "$DOCS_BATCH_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid --docs-batch-size: $DOCS_BATCH_SIZE (must be 0 or a positive integer)" >&2
+    exit 1
+fi
+
 # Safety checks
 if [ "$TARGET_DIR" = "/" ] || [ -z "$TARGET_DIR" ]; then
     echo "Refusing to operate on root '/' or empty target. Provide a valid target directory."
@@ -84,11 +91,8 @@ TOTAL_START_TIME=$(date +%s)
 
 # Categories and directories
 CATEGORIES=(img vid doc arc audio apps nany)
-# create category dirs except 'nany' (lazy)
-for d in "${CATEGORIES[@]}"; do
-    [ "$d" = "nany" ] && continue
-    mkdir -p "$TARGET_DIR/$d"
-done
+# NOTE: do NOT pre-create category directories here; create lazily inside safe_mv
+# This avoids cluttering the target with empty folders unless files are moved.
 
 # Logging and force
 LOGFILE=""
@@ -140,6 +144,11 @@ safe_mv() {
         # also log planned action
         log_entry "DRY-RUN" "$size" "$src" "$destdir/"
         return 0
+    fi
+
+    # Ensure destination directory exists (lazy creation). Skip during dry-run.
+    if [ "$DRY_RUN" != true ]; then
+        mkdir -p -- "$destdir" 2>/dev/null || true
     fi
 
     # collision handling
@@ -327,15 +336,10 @@ if [ "$KEEP_EMPTY" != true ]; then
         case "$ans" in [Yy]*) ;; *) echo "Aborting per user choice."; exit 1 ;; esac
     fi
 
+    # Delete any empty directories under the target (except the target root itself).
+    # This allows category folders (img, audio, etc.) to be removed when they end up empty.
     find "$TARGET_DIR" -depth -type d -empty \
         -not -path "$TARGET_DIR" \
-        -not -path "$TARGET_DIR/img" -not -path "$TARGET_DIR/img/*" \
-        -not -path "$TARGET_DIR/vid" -not -path "$TARGET_DIR/vid/*" \
-        -not -path "$TARGET_DIR/doc" -not -path "$TARGET_DIR/doc/*" \
-        -not -path "$TARGET_DIR/arc" -not -path "$TARGET_DIR/arc/*" \
-        -not -path "$TARGET_DIR/audio" -not -path "$TARGET_DIR/audio/*" \
-        -not -path "$TARGET_DIR/apps" -not -path "$TARGET_DIR/apps/*" \
-        -not -path "$TARGET_DIR/nany" -not -path "$TARGET_DIR/nany/*" \
         -delete 2>/dev/null || true
 fi
 

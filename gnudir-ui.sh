@@ -5,6 +5,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GNUDIR="$SCRIPT_DIR/gnudir.sh"
 
+# Expand paths like ~ and variables, with a safe fallback
+expand_path() {
+  local p="$1"
+  # replace leading ~ with $HOME
+  if [[ "$p" == ~* ]]; then
+    p="${p/#\~/$HOME}"
+  fi
+  # expand any environment vars
+  eval "p=\"$p\""
+  # canonicalize if possible
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -m -- "$p" 2>/dev/null || printf "%s" "$p"
+  else
+    printf "%s" "$p"
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage: $0 [dir]
@@ -19,6 +36,8 @@ if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
 fi
 
 TARGET_DIR="${1:-.}"
+TARGET_DIR_EXPANDED="$(expand_path "$TARGET_DIR")"
+TARGET_DIR="$TARGET_DIR_EXPANDED"
 
 while true; do
   echo "\nGNUDir Cleaner - Interactive Menu"
@@ -45,7 +64,22 @@ while true; do
       eval "\"$GNUDIR\" $flags \"$TARGET_DIR\""
       ;;
     5)
-      read -rp "New target directory: " TARGET_DIR
+      read -erp "New target directory: " INPUT_DIR
+      # expand and normalize
+      NEWDIR="$(expand_path "$INPUT_DIR")"
+      if [ -z "$NEWDIR" ]; then
+        echo "Empty path, keeping: $TARGET_DIR"
+      elif [ -d "$NEWDIR" ]; then
+        TARGET_DIR="$NEWDIR"
+      else
+        read -rp "Target directory does not exist: $NEWDIR. Create it? [y/N]: " createans
+        if [[ "$createans" =~ ^[Yy]$ ]]; then
+          mkdir -p -- "$NEWDIR" || { echo "Failed to create $NEWDIR"; }
+          TARGET_DIR="$NEWDIR"
+        else
+          echo "Keeping current target: $TARGET_DIR"
+        fi
+      fi
       ;;
     6)
       echo "Goodbye"
