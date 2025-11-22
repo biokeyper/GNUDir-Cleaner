@@ -17,4 +17,5 @@ jobs:
           chmod +x ./tests/make_test_tree.sh ./tests/run_tests.sh
       - name: Run tests
         run: |
-          ./tests/run_tests.sh
+          chmod +x ./tests/test_suite.sh
+          ./tests/test_suite.sh
