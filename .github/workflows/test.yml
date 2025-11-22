@@ -1,5 +1,4 @@
 name: Test
-name: Test
 
 on:
   push:
@@ -22,3 +21,4 @@ jobs:
       - name: Run docs batching test
         run: |
           ./tests/test_docs_batch.sh
+      
