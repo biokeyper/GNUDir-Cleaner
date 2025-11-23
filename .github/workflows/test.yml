@@ -1,0 +1,24 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make scripts executable
+        run: |
+          chmod +x ./gnudir.sh
+          chmod +x ./tests/*.sh
+      - name: Run test suite
+        run: |
+          ./tests/test_suite.sh
+      - name: Run docs batching test
+        run: |
+          ./tests/test_docs_batch.sh
+      
