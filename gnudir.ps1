@@ -154,17 +154,35 @@ foreach ($f in $MiscFiles) {
 }
 $CategoryStats["nany"] = @{ Count = $count; Bytes = $bytes }
 
-# Remove empty dirs
+# Remove empty directories deepest-first, including whole branches
+# if (-not $KeepEmpty) {
+#     Get-ChildItem -Path $TargetDir -Recurse -Directory |
+#         Sort-Object FullName -Descending |
+#         ForEach-Object {
+#             # Count only real files (exclude directories)
+#             $fileCount = (Get-ChildItem $_.FullName -File -Force -ErrorAction SilentlyContinue | Measure-Object).Count
+#             if ($fileCount -eq 0) {
+#                 # If no files remain, remove the directory (children already removed first)
+#                 Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+#                 if ($ShowVerbose) { Write-Host "Removed empty directory: $($_.FullName)" }
+#             }
+#         }
+# }
+
+# Remove empty directories deepest-first, including whole branches
 if (-not $KeepEmpty) {
     Get-ChildItem -Path $TargetDir -Recurse -Directory |
         Sort-Object FullName -Descending |
         ForEach-Object {
-            if ((Get-ChildItem $_.FullName -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0) {
-                Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+            $fileCount = (Get-ChildItem $_.FullName -File -Force -ErrorAction SilentlyContinue | Measure-Object).Count
+            if ($fileCount -eq 0) {
+                Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 if ($ShowVerbose) { Write-Host "Removed empty directory: $($_.FullName)" }
             }
         }
 }
+
+
 
 # Totals
 $TOTAL_END_TIME = Get-Date
