@@ -110,10 +110,16 @@ function Safe-Move {
 # Start timer
 $startTime = Get-Date
 
-# Collect files
+# Collect files, excluding numbered batch folders in doc/ to prevent re-processing already batched files
 $gciParams = @{ Path = $TargetDir; File = $true; ErrorAction = 'SilentlyContinue' }
 if ($Recurse) { $gciParams.Recurse = $true }
-$AllFiles = Get-ChildItem @gciParams | Where-Object { $Exclude -notcontains $_.FullName }
+$AllFiles = Get-ChildItem @gciParams | Where-Object { 
+    $file = $_
+    $relativePath = $file.FullName.Substring($TargetDir.Length + 1)
+    $Exclude -notcontains $file.FullName -and
+    # Exclude files in doc/{digit}/ batch folders only, not all of doc/
+    -not ($relativePath -match '^doc\\(\d+)\\')
+}
 
 $Processed = @()
 $CategoryStats = @{}
@@ -131,19 +137,59 @@ foreach ($c in $Categories) {
     Write-Host "$c moved: $count files"
 }
 
+
 # Docs batching
 if ($DocsBatchSize -gt 0) {
-    $Docs = Get-ChildItem (Join-Path $TargetDir "doc") -File
-    $i = 1; $batch = 1
-    foreach ($f in $Docs) {
-        if ($i -gt $DocsBatchSize) { $batch++; $i = 1 }
-        $BatchDir = Join-Path $TargetDir "doc\$batch"
-        if (-not (Test-Path $BatchDir)) { New-Item -ItemType Directory -Force -Path $BatchDir | Out-Null }
-        Move-Item $f.FullName -Destination $BatchDir -Force
-        $i++
+    $docRoot = Join-Path $TargetDir "doc"
+    if (Test-Path $docRoot) {
+        # Get only files directly in doc root (not subdirectories)
+        $Docs = Get-ChildItem $docRoot -File
+
+        if ($Docs.Count -gt 0) {
+            if ($ShowVerbose) {
+                Write-Host "Batching $($Docs.Count) documents into groups of $DocsBatchSize ..."
+                Write-Host "First file: $($Docs[0].FullName)"
+                Write-Host "File exists: $(Test-Path $Docs[0].FullName)"
+            } else {
+                Write-Host "Batching $($Docs.Count) documents into groups of $DocsBatchSize ..."
+            }
+            
+            # Find existing batch folders and calculate next batch number
+            $existingBatchFolders = Get-ChildItem $docRoot -Directory | Where-Object { $_.Name -match '^\d+$' }
+            $maxBatch = 0
+            if ($existingBatchFolders.Count -gt 0) {
+                $maxBatch = $existingBatchFolders.Name | ForEach-Object { [int]$_ } | Measure-Object -Maximum | Select-Object -ExpandProperty Maximum
+            }
+            $batch = $maxBatch + 1
+            $i = 1
+            $movedCount = 0
+            
+            $BatchDir = Join-Path $docRoot "$batch"
+            if (-not (Test-Path $BatchDir)) { New-Item -ItemType Directory -Force -Path $BatchDir | Out-Null }
+
+            foreach ($f in $Docs) {
+                if ($i -gt $DocsBatchSize) {
+                    $batch++; $i = 1
+                    $BatchDir = Join-Path $docRoot "$batch"
+                    if (-not (Test-Path $BatchDir)) { New-Item -ItemType Directory -Force -Path $BatchDir | Out-Null }
+                }
+                try {
+                    Move-Item -LiteralPath $f.FullName -Destination $BatchDir -Force -ErrorAction Stop
+                    if ($ShowVerbose) { Write-Host "Batched: $($f.Name) -> $batch" }
+                    $movedCount++
+                } catch {
+                    if ($ShowVerbose) { Write-Host "ERROR batching $($f.Name): $($_.Exception.Message)" }
+                }
+                $i++
+            }
+            Write-Host "Documents batched: $movedCount files into folders (highest folder: $batch, starting from $($maxBatch + 1))."
+        } else {
+            if ($ShowVerbose) { Write-Host "No new documents to batch." }
+        }
     }
-    Write-Host "Documents batched into $batch folders."
 }
+
+
 
 # Miscellaneous
 $MiscFiles = $AllFiles | Where-Object { $Processed -notcontains $_ }
@@ -155,27 +201,12 @@ foreach ($f in $MiscFiles) {
 $CategoryStats["nany"] = @{ Count = $count; Bytes = $bytes }
 
 # Remove empty directories deepest-first, including whole branches
-# if (-not $KeepEmpty) {
-#     Get-ChildItem -Path $TargetDir -Recurse -Directory |
-#         Sort-Object FullName -Descending |
-#         ForEach-Object {
-#             # Count only real files (exclude directories)
-#             $fileCount = (Get-ChildItem $_.FullName -File -Force -ErrorAction SilentlyContinue | Measure-Object).Count
-#             if ($fileCount -eq 0) {
-#                 # If no files remain, remove the directory (children already removed first)
-#                 Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
-#                 if ($ShowVerbose) { Write-Host "Removed empty directory: $($_.FullName)" }
-#             }
-#         }
-# }
-
-# Remove empty directories deepest-first, including whole branches
 if (-not $KeepEmpty) {
     Get-ChildItem -Path $TargetDir -Recurse -Directory |
         Sort-Object FullName -Descending |
         ForEach-Object {
-            $fileCount = (Get-ChildItem $_.FullName -File -Force -ErrorAction SilentlyContinue | Measure-Object).Count
-            if ($fileCount -eq 0) {
+            $hasChildren = (Get-ChildItem $_.FullName -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if (-not $hasChildren) {
                 Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 if ($ShowVerbose) { Write-Host "Removed empty directory: $($_.FullName)" }
             }

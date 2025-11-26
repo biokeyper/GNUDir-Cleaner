@@ -69,3 +69,21 @@
 
 ---
 
+## 🧪 Testing
+
+To run the automated test suite:
+
+```powershell
+cd tests
+.\test_suite.ps1
+```
+
+The test suite verifies:
+- ✅ File categorization (images, videos, documents, archives, audio, apps, misc)
+- ✅ Document batching functionality (splits 150 files into batches of 50)
+- ✅ Dry-run mode (preview without making changes)
+
+All tests should pass before deployment.
+
+---
+
