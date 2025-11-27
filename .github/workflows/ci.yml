@@ -47,6 +47,12 @@ jobs:
           cd tests
           .\test_suite.ps1
 
+      - name: Run Safety Tests
+        shell: pwsh
+        run: |
+          cd tests
+          .\test_safety.ps1
+
   linux-tests:
     runs-on: ubuntu-latest
     steps:

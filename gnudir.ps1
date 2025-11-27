@@ -1,3 +1,83 @@
+<#
+.SYNOPSIS
+    Organizes files in a directory into category-specific subdirectories.
+
+.DESCRIPTION
+    GNUDir Cleaner automatically categorizes and organizes files in a target directory based on their file extensions.
+    Files are moved into subdirectories: img (images), vid (videos), doc (documents), arc (archives), 
+    audio (audio files), apps (applications), and nany (miscellaneous/unknown types).
+    
+    The script supports recursive operation, dry-run preview, collision handling, document batching into
+    numbered subfolders, and comprehensive logging.
+
+.PARAMETER TargetDir
+    The directory to organize. This is a required parameter.
+    Example: "C:\Users\YourName\Downloads"
+
+.PARAMETER Recurse
+    Recurse into subdirectories of the target directory. Files already in category folders are excluded
+    to prevent re-processing.
+
+.PARAMETER DryRun
+    Preview actions without actually moving files. Shows what would be done without making changes.
+
+.PARAMETER ShowVerbose
+    Print detailed per-file operations and helpful messages during execution.
+
+.PARAMETER KeepEmpty
+    Do not delete empty directories after organizing. By default, empty directories are removed.
+
+.PARAMETER BackupMode
+    Strategy for handling filename collisions. Valid values:
+    - 'numbered' (default): Append numbers to duplicate filenames (file-1.txt, file-2.txt)
+    - 'timestamp': Append timestamp to filename (file-20250127103045.txt)
+    - 'overwrite': Replace existing files
+    - 'skip': Skip files that already exist
+
+.PARAMETER DocsBatchSize
+    Split the doc/ folder into numbered subfolders with this many files each.
+    For example, with -DocsBatchSize 100, files are organized into doc/1/, doc/2/, etc.
+    Set to 0 (default) to disable batching.
+
+.PARAMETER Exclude
+    Array of file paths to exclude from processing. Can specify multiple paths.
+
+.PARAMETER LogFile
+    Path to a CSV log file. Operations will be logged with timestamp, status, bytes, source, and destination.
+
+.EXAMPLE
+    .\gnudir.ps1 -TargetDir "C:\Users\YourName\Downloads"
+    
+    Organize files in the Downloads folder into category subdirectories.
+
+.EXAMPLE
+    .\gnudir.ps1 -TargetDir "C:\Users\YourName\Downloads" -Recurse -DryRun -ShowVerbose
+    
+    Preview what would happen when organizing Downloads recursively, with detailed output.
+
+.EXAMPLE
+    .\gnudir.ps1 -TargetDir "C:\Users\YourName\Documents" -Recurse -DocsBatchSize 100
+    
+    Organize Documents recursively and batch document files into groups of 100 per subfolder.
+
+.EXAMPLE
+    .\gnudir.ps1 -TargetDir "D:\ProjectFiles" -Recurse -LogFile "C:\Logs\organize.csv" -BackupMode timestamp
+    
+    Organize ProjectFiles recursively, log all operations to CSV, and use timestamp-based collision handling.
+
+.NOTES
+    Author: BioKeyPer
+    Version: 0.0.0.7
+    License: GNU AGPL v3
+    
+    Category folders are created only when files are moved into them. Files already in the correct
+    category folder are not moved. Document batching preserves existing numbered batch folders
+    and starts new batches after the highest existing number.
+
+.LINK
+    https://github.com/biokeyper/GNUDir-Cleaner
+#>
+
 param(
     [Parameter(Mandatory=$true)]
     [string]$TargetDir,
@@ -17,16 +97,108 @@ param(
     [string]$LogFile
 )
 
-# Safety checks
+# Helper function for user-friendly error messages
+function Show-FriendlyError {
+    param(
+        [string]$ErrorType,
+        [string]$Details,
+        [int]$ExitCode = 1
+    )
+    
+    $message = switch ($ErrorType) {
+        "InvalidTarget" { 
+            "Invalid target directory: $Details`n" +
+            "Please provide a valid directory path. Example: -TargetDir 'C:\Users\YourName\Downloads'"
+        }
+        "RootDir" {
+            "Safety check failed: Cannot operate on system root directory.`n" +
+            "Please specify a subdirectory to organize."
+        }
+        "NotFound" {
+            "Directory not found: $Details`n" +
+            "Please verify the path exists and you have permission to access it."
+        }
+        "PermissionDenied" {
+            "Permission denied: $Details`n" +
+            "Try running PowerShell as Administrator, or check folder permissions."
+        }
+        "FileLocked" {
+            "File is in use: $Details`n" +
+            "Close any programs using this file and try again."
+        }
+        "PathTooLong" {
+            "Path exceeds Windows limit (260 characters): $Details`n" +
+            "Consider enabling long paths in Windows or use shorter folder names."
+        }
+        "SystemDir" {
+            "Safety check failed: Protected system directory detected.`n" +
+            "Cannot operate on: $Details`n" +
+            "To protect your system, this script cannot run on Windows, Program Files, or the system drive root."
+        }
+        default {
+            "Error: $Details"
+        }
+    }
+    
+    Write-Host "ERROR: $message" -ForegroundColor Red
+    exit $ExitCode
+}
+
+# Helper function to check path length
+function Test-PathLength {
+    param([string]$Path)
+    
+    # Windows default MAX_PATH is 260 characters
+    $MAX_PATH = 260
+    
+    if ($Path.Length -ge $MAX_PATH) {
+        Write-Warning "Path may be too long ($($Path.Length) chars): $Path"
+        Write-Warning "To enable long paths: Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1"
+        return $false
+    }
+    return $true
+}
+
+# Safety checks with enhanced error messages
 if ([string]::IsNullOrWhiteSpace($TargetDir) -or $TargetDir -eq "\") {
-    Write-Error "Refusing to operate on root or empty target."
-    exit 1
+    Show-FriendlyError -ErrorType "RootDir" -Details $TargetDir
 }
+
 if (-not (Test-Path $TargetDir -PathType Container)) {
-    Write-Error "Target directory does not exist: $TargetDir"
-    exit 1
+    Show-FriendlyError -ErrorType "NotFound" -Details $TargetDir
 }
-$TargetDir = (Resolve-Path $TargetDir).Path
+
+try {
+    $TargetDir = (Resolve-Path $TargetDir).Path
+} catch {
+    Show-FriendlyError -ErrorType "PermissionDenied" -Details "$TargetDir - $($_.Exception.Message)"
+}
+
+# Critical Safety Checks: Block system directories
+$SystemPaths = @(
+    $env:SystemRoot,
+    $env:ProgramFiles,
+    ${env:ProgramFiles(x86)}
+)
+
+# Block system folders and their subdirectories
+foreach ($path in $SystemPaths) {
+    if ($path -and ($TargetDir -eq $path -or $TargetDir.StartsWith("$path\"))) {
+        Show-FriendlyError -ErrorType "SystemDir" -Details $TargetDir
+    }
+}
+
+# Block system drive root explicitly
+$SystemDrive = [System.IO.Path]::GetPathRoot($env:SystemRoot)
+try {
+    $tItem = Get-Item $TargetDir
+    $sItem = Get-Item $SystemDrive
+    if ($tItem.FullName.TrimEnd('\') -eq $sItem.FullName.TrimEnd('\')) {
+         Show-FriendlyError -ErrorType "SystemDir" -Details $TargetDir
+    }
+} catch {
+    # Ignore errors here, if we can't get item we can't check it
+}
 
 # Categories
 $Categories = @("img","vid","doc","arc","audio","apps","nany")
@@ -96,10 +268,26 @@ function Safe-Move {
     }
 
     try {
-        Move-Item -LiteralPath $Source -Destination $Dest -Force
+        Move-Item -LiteralPath $Source -Destination $Dest -Force -ErrorAction Stop
         if ($ShowVerbose) { Write-Host "Moved: $Source -> $Dest" }
         Write-Log "OK" $size $Source $Dest
         return $SourceFile
+    }
+    catch [System.IO.IOException] {
+        # File in use or locked
+        if ($_.Exception.Message -match "being used by another process") {
+            if ($ShowVerbose) { 
+                Write-Warning "File locked: $($SourceFile.Name) - skipping (close the file and try again)"
+            }
+            Write-Log "LOCKED" $size $Source $Dest
+        } else {
+            Write-Warning "IO Error moving $($SourceFile.Name): $($_.Exception.Message)"
+            Write-Log "IO-ERROR" $size $Source $Dest
+        }
+    }
+    catch [System.UnauthorizedAccessException] {
+        Write-Warning "Permission denied for $($SourceFile.Name) - check file permissions or run as Administrator"
+        Write-Log "PERMISSION-DENIED" $size $Source $Dest
     }
     catch {
         Write-Warning "Failed to move: $Source -> $Dest. Error: $($_.Exception.Message)"
@@ -125,17 +313,31 @@ $Processed = @()
 $CategoryStats = @{}
 
 # Run categories
+$catIndex = 0
+$totalCategories = ($Categories | Where-Object { $_ -ne "nany" }).Count
+
 foreach ($c in $Categories) {
     if ($c -eq "nany") { continue }
+    $catIndex++
+    
     $Files = $AllFiles | Where-Object { $Patterns[$c] -contains $_.Extension.ToLower() }
     $count = 0; $bytes = 0
+    $fileIndex = 0
+    $totalFiles = $Files.Count
+    
     foreach ($f in $Files) {
+        $fileIndex++
+        Write-Progress -Activity "Organizing Files" -Status "Category: $c ($catIndex/$totalCategories)" `
+            -CurrentOperation "Processing: $($f.Name)" `
+            -PercentComplete (($catIndex-1)/$totalCategories*100 + ($fileIndex/$totalFiles)/$totalCategories*100)
+        
         $MovedFile = Safe-Move -SourceFile $f -DestDir (Join-Path $TargetDir $c)
         if ($MovedFile) { $Processed += $f; $count++; $bytes += $f.Length }
     }
     $CategoryStats[$c] = @{ Count = $count; Bytes = $bytes }
     Write-Host "$c moved: $count files"
 }
+Write-Progress -Activity "Organizing Files" -Completed
 
 
 # Docs batching
@@ -167,7 +369,13 @@ if ($DocsBatchSize -gt 0) {
             $BatchDir = Join-Path $docRoot "$batch"
             if (-not (Test-Path $BatchDir)) { New-Item -ItemType Directory -Force -Path $BatchDir | Out-Null }
 
+            $docIndex = 0
             foreach ($f in $Docs) {
+                $docIndex++
+                Write-Progress -Activity "Batching Documents" -Status "Batch $batch" `
+                    -CurrentOperation "Processing: $($f.Name)" `
+                    -PercentComplete ($docIndex/$Docs.Count*100)
+                
                 if ($i -gt $DocsBatchSize) {
                     $batch++; $i = 1
                     $BatchDir = Join-Path $docRoot "$batch"
@@ -182,6 +390,7 @@ if ($DocsBatchSize -gt 0) {
                 }
                 $i++
             }
+            Write-Progress -Activity "Batching Documents" -Completed
             Write-Host "Documents batched: $movedCount files into folders (highest folder: $batch, starting from $($maxBatch + 1))."
         } else {
             if ($ShowVerbose) { Write-Host "No new documents to batch." }
