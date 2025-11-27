@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, dev, gnu-win ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  windows-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path .\gnudir.ps1 -Recurse -Severity Warning,Error
+          if ($results) {
+            $results | ForEach-Object { Write-Host "::warning file=$($_.ScriptPath),line=$($_.Line)::$($_.Message)" }
+            if ($results | Where-Object { $_.Severity -eq 'Error' }) {
+              Write-Error "PSScriptAnalyzer found errors"
+              exit 1
+            }
+          }
+
+      - name: Validate PowerShell Syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content .\gnudir.ps1 -Raw), [ref]$errors)
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "::error file=gnudir.ps1,line=$($_.Token.StartLine)::$($_.Message)" }
+            exit 1
+          }
+          Write-Host "✓ PowerShell syntax is valid"
+
+      - name: Run Test Suite
+        shell: pwsh
+        run: |
+          cd tests
+          .\test_suite.ps1
+
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck gnudir.sh || true
+
+      - name: Make scripts executable
+        run: |
+          chmod +x ./gnudir.sh
+          chmod +x ./tests/*.sh
+
+      - name: Run Bash Test Suite
+        run: |
+          ./tests/test_suite.sh
+
+      - name: Run Docs Batching Test
+        run: |
+          ./tests/test_docs_batch.sh
