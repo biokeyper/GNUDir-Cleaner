@@ -190,8 +190,14 @@ foreach ($path in $SystemPaths) {
 
 # Block system drive root explicitly
 $SystemDrive = [System.IO.Path]::GetPathRoot($env:SystemRoot)
-if ($TargetDir.TrimEnd('\') -eq $SystemDrive.TrimEnd('\')) {
-     Show-FriendlyError -ErrorType "SystemDir" -Details $TargetDir
+try {
+    $tItem = Get-Item $TargetDir
+    $sItem = Get-Item $SystemDrive
+    if ($tItem.FullName.TrimEnd('\') -eq $sItem.FullName.TrimEnd('\')) {
+         Show-FriendlyError -ErrorType "SystemDir" -Details $TargetDir
+    }
+} catch {
+    # Ignore errors here, if we can't get item we can't check it
 }
 
 # Categories
