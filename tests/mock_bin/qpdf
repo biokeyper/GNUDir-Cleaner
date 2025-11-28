@@ -1,0 +1,39 @@
+#!/bin/bash
+# Mock qpdf
+if [[ "$1" == "--show-npages" ]]; then
+    echo "20"
+    exit 0
+fi
+
+# Handle split: qpdf input --split-pages=N output
+# Args might be: input --split-pages=5 output
+# or: --split-pages=5 input output (qpdf is flexible, but my script uses: input --split-pages=N output)
+
+# Parse args roughly
+input=""
+output=""
+split_n=""
+
+for arg in "$@"; do
+    if [[ "$arg" == --split-pages=* ]]; then
+        split_n="${arg#*=}"
+    elif [[ -z "$input" ]]; then
+        input="$arg"
+    else
+        output="$arg"
+    fi
+done
+
+if [[ -n "$split_n" ]]; then
+    # Create dummy split files
+    # output is like "path/to/name-split.pdf"
+    # qpdf creates "path/to/name-split-01.pdf"
+    base="${output%.pdf}"
+    touch "${base}-01.pdf"
+    touch "${base}-02.pdf"
+    touch "${base}-03.pdf"
+    touch "${base}-04.pdf"
+    exit 0
+fi
+
+exit 1
