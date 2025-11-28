@@ -14,6 +14,8 @@ VERBOSE=false
 KEEP_EMPTY=false
 BACKUP_MODE="numbered" # numbered|timestamp|overwrite|skip
 DOCS_BATCH_SIZE=0
+SPLIT_PDF_PAGES=0
+SPLIT_TARGET=""
 EXCLUDES=()
 
 usage() {
@@ -27,7 +29,9 @@ Options:
   --backup-mode MODE   Collision handling: numbered|timestamp|overwrite|skip (default: numbered)
   --exclude PATH       Exclude path (may be used multiple times)
   --keep-empty         Do not delete empty directories after organizing
-    --docs-batch-size N   Batch documents into subfolders of N files (default: 0 = disabled)
+  --docs-batch-size N  Batch documents into subfolders of N files (default: 0 = disabled)
+  --split-pdf-pages N  Split PDFs into chunks of N pages (requires qpdf)
+  --split-target NAME  Only apply PDF splitting to files matching NAME (e.g. "book.pdf")
   --help               Show this help
 
 Example:
@@ -48,6 +52,8 @@ while [ "$#" -gt 0 ]; do
         --backup-mode) BACKUP_MODE="$2"; shift 2 ;;
         --exclude) EXCLUDES+=("$2"); shift 2 ;;
         --docs-batch-size) DOCS_BATCH_SIZE=${2:-0}; shift 2 ;;
+        --split-pdf-pages) SPLIT_PDF_PAGES=${2:-0}; shift 2 ;;
+        --split-target) SPLIT_TARGET="$2"; shift 2 ;;
         --help) usage; exit 0 ;;
         --*) echo "Unknown option: $1"; usage; exit 1 ;;
         *) ARGS+=("$1"); shift ;;
@@ -55,16 +61,28 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ ${#ARGS[@]} -lt 1 ]; then
-    echo "Error: target directory required"
-    usage
-    exit 1
+    # Directory is optional if split-target contains a path
+    if [ "$SPLIT_PDF_PAGES" -gt 0 ] && [[ "$SPLIT_TARGET" == */* ]]; then
+        # Direct path mode - create a dummy target dir
+        TARGET_DIR=$(mktemp -d) || TARGET_DIR="/tmp/gnudir_$$"
+    else
+        echo "Error: target directory required"
+        usage
+        exit 1
+    fi
+else
+    TARGET_DIR=${ARGS[0]}
 fi
-
-TARGET_DIR=${ARGS[0]}
 
 # validate docs batch size is a non-negative integer
 if ! printf '%s' "$DOCS_BATCH_SIZE" | grep -Eq '^[0-9]+$'; then
     echo "Invalid --docs-batch-size: $DOCS_BATCH_SIZE (must be 0 or a positive integer)" >&2
+    exit 1
+fi
+
+# validate split pdf pages
+if ! printf '%s' "$SPLIT_PDF_PAGES" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid --split-pdf-pages: $SPLIT_PDF_PAGES (must be 0 or a positive integer)" >&2
     exit 1
 fi
 
@@ -282,16 +300,246 @@ run_category() {
     echo "${cat^} moved: ${count[$cat]} files, $(hr ${size_bytes[$cat]}) in ${elapsed} seconds."
 }
 
-# Run each category
-run_category img img_patterns
-run_category vid vid_patterns
-run_category doc doc_patterns
-run_category arc arc_patterns
-run_category audio audio_patterns
-run_category apps apps_patterns
+# Run each category (skip if only doing PDF splitting)
+if [ "$SPLIT_PDF_PAGES" -le 0 ]; then
+    run_category img img_patterns
+    run_category vid vid_patterns
+    run_category doc doc_patterns
+    run_category arc arc_patterns
+    run_category audio audio_patterns
+    run_category apps apps_patterns
+else
+    echo "Skipping file organization (PDF splitting mode)."
+fi
 
-# docs batching
-if [ "$DOCS_BATCH_SIZE" -gt 0 ]; then
+# Helper to install qpdf
+install_qpdf() {
+    echo "qpdf is required for PDF splitting but is not installed."
+    read -r -p "Attempt to install qpdf? [y/N] " ans
+    case "$ans" in
+        [Yy]*) ;;
+        *) echo "Skipping PDF splitting."; return 1 ;;
+    esac
+
+    if command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update && sudo apt-get install -y qpdf
+    elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y qpdf
+    elif command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --noconfirm qpdf
+    elif command -v zypper >/dev/null 2>&1; then
+        sudo zypper install -y qpdf
+    elif command -v brew >/dev/null 2>&1; then
+        brew install qpdf
+    else
+        echo "No supported package manager found (apt, dnf, pacman, zypper, brew)."
+        echo "Please install qpdf manually."
+        return 1
+    fi
+}
+
+# Helper to validate PDF file
+validate_pdf() {
+    local file="$1"
+    local min_pages="$2"
+    
+    # Check file exists
+    if [ ! -f "$file" ]; then
+        echo "Error: File not found: $file" >&2
+        return 1
+    fi
+    
+    # Check extension (case-insensitive)
+    local ext="${file##*.}"
+    if [ "${ext,,}" != "pdf" ]; then
+        echo "Error: File is not a PDF: $file" >&2
+        return 1
+    fi
+    
+    # Check if qpdf can read it and get page count
+    local pages
+    pages=$(qpdf --show-npages "$file" 2>/dev/null)
+    if [ -z "$pages" ] || ! [[ "$pages" =~ ^[0-9]+$ ]]; then
+        echo "Error: Unable to read PDF or corrupted file: $file" >&2
+        return 1
+    fi
+    
+    # Check if file has enough pages to split
+    if [ "$pages" -le "$min_pages" ]; then
+        echo "Info: PDF has only $pages pages (split size: $min_pages). Skipping: $file" >&2
+        return 1
+    fi
+    
+    # Return page count via stdout for caller to use
+    echo "$pages"
+    return 0
+}
+
+# PDF splitting
+if [ "$SPLIT_PDF_PAGES" -gt 0 ]; then
+    if ! command -v qpdf >/dev/null 2>&1; then
+        if ! install_qpdf; then
+            # Already printed error/warning in function
+            :
+        fi
+    fi
+
+    # Check again if qpdf is available after attempted install
+    if command -v qpdf >/dev/null 2>&1; then
+        # Prompt for target if not specified
+        if [ -z "$SPLIT_TARGET" ]; then
+            echo "No target specified for PDF splitting."
+            read -r -p "Enter filename or path to split (case-sensitive), or press Enter to skip: " user_target
+            if [ -n "$user_target" ]; then
+                SPLIT_TARGET="$user_target"
+            else
+                echo "Skipping PDF splitting."
+            fi
+        fi
+
+        if [ -n "$SPLIT_TARGET" ]; then
+            # Detect if SPLIT_TARGET is a path (contains /) or just a filename
+            if [[ "$SPLIT_TARGET" == */* ]]; then
+                # Direct path mode
+                echo "Processing direct path: $SPLIT_TARGET"
+                
+                # Validate the PDF
+                pages=$(validate_pdf "$SPLIT_TARGET" "$SPLIT_PDF_PAGES")
+                if [ $? -eq 0 ]; then
+                    # Get directory and filename components
+                    pdf_dir=$(dirname -- "$SPLIT_TARGET")
+                    base_pdf=$(basename -- "$SPLIT_TARGET")
+                    name_noext="${base_pdf%.*}"
+                    
+                    # Create output directory named after document
+                    output_dir="$pdf_dir/$name_noext"
+                    mkdir -p "$output_dir"
+                    
+                    echo "  Splitting $base_pdf ($pages pages)..."
+                    qpdf "$SPLIT_TARGET" --split-pages="$SPLIT_PDF_PAGES" "$output_dir/${name_noext}-split.pdf" 2>/dev/null
+                    
+                    # Check if split was successful and list generated files
+                    if ls "$output_dir/${name_noext}-split"* >/dev/null 2>&1; then
+                        echo "  Splitting completed:"
+                        total_size=0
+                        file_count=0
+                        page_start=1
+                        
+                        # List all split files with details
+                        for split_file in "$output_dir/${name_noext}-split"*.pdf; do
+                            if [ -f "$split_file" ]; then
+                                file_count=$((file_count + 1))
+                                file_size=$(stat -c%s -- "$split_file" 2>/dev/null || wc -c <"$split_file" 2>/dev/null || echo 0)
+                                total_size=$((total_size + file_size))
+                                hr_size=$(hr "$file_size")
+                                page_end=$((page_start + SPLIT_PDF_PAGES - 1))
+                                if [ $page_end -gt $pages ]; then
+                                    page_end=$pages
+                                fi
+                                echo "    ✓ $(basename "$split_file") ($hr_size, pages $page_start-$page_end)"
+                                page_start=$((page_end + 1))
+                            fi
+                        done
+                        
+                        echo "  Total: $file_count files, $(hr $total_size)"
+                        echo "  Output directory: $output_dir"
+                        
+                        # Move original to backup folder inside document folder
+                        mkdir -p "$output_dir/backup"
+                        mv -- "$SPLIT_TARGET" "$output_dir/backup/" 2>/dev/null
+                        $VERBOSE && echo "  Original moved to backup/."
+                    else
+                        echo "    Failed to split $base_pdf" >&2
+                    fi
+                fi
+            else
+                # Filename mode - search in doc/ first, then fallback to base dir
+                echo "Splitting PDFs in doc/ into chunks of $SPLIT_PDF_PAGES pages..."
+                echo "  Targeting specific file: $SPLIT_TARGET"
+                
+                # Try doc/ first
+                find_args=("$TARGET_DIR/doc" -maxdepth 1 -type f -name "$SPLIT_TARGET")
+                found_file=""
+                while IFS= read -r -d '' pdf; do
+                    found_file="$pdf"
+                    break
+                done < <(find "${find_args[@]}" -print0 2>/dev/null)
+                
+                # Fallback to base directory if not found in doc/
+                if [ -z "$found_file" ]; then
+                    echo "  File not found in doc/"
+                    echo "  Searching in $TARGET_DIR..."
+                    find_args=("$TARGET_DIR" -maxdepth 1 -type f -name "$SPLIT_TARGET")
+                    while IFS= read -r -d '' pdf; do
+                        found_file="$pdf"
+                        break
+                    done < <(find "${find_args[@]}" -print0 2>/dev/null)
+                    
+                    if [ -n "$found_file" ]; then
+                        echo "  Found: $found_file"
+                    fi
+                fi
+                
+                # Process the file if found
+                if [ -n "$found_file" ]; then
+                    # Validate the PDF
+                    pages=$(validate_pdf "$found_file" "$SPLIT_PDF_PAGES")
+                    if [ $? -eq 0 ]; then
+                        pdf_dir=$(dirname -- "$found_file")
+                        base_pdf=$(basename -- "$found_file")
+                        name_noext="${base_pdf%.*}"
+                        
+                        # Create output directory named after document
+                        output_dir="$pdf_dir/$name_noext"
+                        mkdir -p "$output_dir"
+                        
+                        echo "  Splitting $base_pdf ($pages pages)..."
+                        qpdf "$found_file" --split-pages="$SPLIT_PDF_PAGES" "$output_dir/${name_noext}-split.pdf" 2>/dev/null
+                        
+                        # Check if split was successful and list generated files
+                        if ls "$output_dir/${name_noext}-split"* >/dev/null 2>&1; then
+                            echo "  Splitting completed:"
+                            total_size=0
+                            file_count=0
+                            page_start=1
+                            
+                            # List all split files with details
+                            for split_file in "$output_dir/${name_noext}-split"*.pdf; do
+                                if [ -f "$split_file" ]; then
+                                    file_count=$((file_count + 1))
+                                    file_size=$(stat -c%s -- "$split_file" 2>/dev/null || wc -c <"$split_file" 2>/dev/null || echo 0)
+                                    total_size=$((total_size + file_size))
+                                    hr_size=$(hr "$file_size")
+                                    page_end=$((page_start + SPLIT_PDF_PAGES - 1))
+                                    if [ $page_end -gt $pages ]; then
+                                        page_end=$pages
+                                    fi
+                                    echo "    ✓ $(basename "$split_file") ($hr_size, pages $page_start-$page_end)"
+                                    page_start=$((page_end + 1))
+                                fi
+                            done
+                            
+                            echo "  Total: $file_count files, $(hr $total_size)"
+                            echo "  Output directory: $output_dir"
+                            
+                            # Move original to backup folder
+                            mkdir -p "$output_dir/backup"
+                            mv -- "$found_file" "$output_dir/backup/" 2>/dev/null
+                            $VERBOSE && echo "  Original moved to backup/."
+                        else
+                            echo "    Failed to split $base_pdf" >&2
+                        fi
+                    fi
+                else
+                    echo "  Error: File '$SPLIT_TARGET' not found in doc/ or $TARGET_DIR" >&2
+                fi
+            fi
+        fi
+    fi
+fi
+
+# docs batching (skip if only doing PDF splitting)
+if [ "$DOCS_BATCH_SIZE" -gt 0 ] && [ "$SPLIT_PDF_PAGES" -le 0 ]; then
     echo "Batching documents into groups of $DOCS_BATCH_SIZE..."
     i=1; batch=1
     mkdir -p "$TARGET_DIR/doc/1"
@@ -306,26 +554,28 @@ if [ "$DOCS_BATCH_SIZE" -gt 0 ]; then
     echo "Documents batched into $batch folders."
 fi
 
-# move leftover files (unknown) into nany
-echo "Moving miscellaneous files..."
-start_misc=$(date +%s)
-while IFS= read -r -d '' f; do
-    [ -f "$f" ] || continue
-    parent=$(dirname -- "$f")
-    # skip files already inside category dirs
-    case "$parent" in
-        "$TARGET_DIR"|"$TARGET_DIR/img"|"$TARGET_DIR/vid"|"$TARGET_DIR/doc"|"$TARGET_DIR/arc"|"$TARGET_DIR/audio"|"$TARGET_DIR/apps"|"$TARGET_DIR/nany")
-            ;;
-    esac
-    result=$(safe_mv "$f" "$TARGET_DIR/nany") || continue
-    if [ -n "$result" ]; then
-        s=$(printf '%s' "$result" | cut -f1)
-        ((count[nany]++))
-        size_bytes[nany]=$((size_bytes[nany] + s))
-    fi
-done < <(find "${find_base[@]}" -print0 2>/dev/null)
-end_misc=$(date +%s)
-echo "Misc moved: ${count[nany]} files, $(hr ${size_bytes[nany]}) in $((end_misc - start_misc)) seconds."
+# move leftover files (unknown) into nany (skip if only doing PDF splitting)
+if [ "$SPLIT_PDF_PAGES" -le 0 ]; then
+    echo "Moving miscellaneous files..."
+    start_misc=$(date +%s)
+    while IFS= read -r -d '' f; do
+        [ -f "$f" ] || continue
+        parent=$(dirname -- "$f")
+        # skip files already inside category dirs
+        case "$parent" in
+            "$TARGET_DIR"|"$TARGET_DIR/img"|"$TARGET_DIR/vid"|"$TARGET_DIR/doc"|"$TARGET_DIR/arc"|"$TARGET_DIR/audio"|"$TARGET_DIR/apps"|"$TARGET_DIR/nany")
+                ;;
+        esac
+        result=$(safe_mv "$f" "$TARGET_DIR/nany") || continue
+        if [ -n "$result" ]; then
+            s=$(printf '%s' "$result" | cut -f1)
+            ((count[nany]++))
+            size_bytes[nany]=$((size_bytes[nany] + s))
+        fi
+    done < <(find "${find_base[@]}" -print0 2>/dev/null)
+    end_misc=$(date +%s)
+    echo "Misc moved: ${count[nany]} files, $(hr ${size_bytes[nany]}) in $((end_misc - start_misc)) seconds."
+fi
 
 # Delete empty directories (safely)
 if [ "$KEEP_EMPTY" != true ]; then
