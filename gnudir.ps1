@@ -67,12 +67,19 @@
 
 .NOTES
     Author: BioKeyPer
-    Version: 0.0.0.7
+    Version: 0.0.0.8
     License: GNU AGPL v3
+    
+    SAFETY FEATURES:
+    The script automatically blocks execution on protected directories to prevent system damage:
+    - System directories: C:\Windows, C:\Program Files, C:\ root
+    - Application installations: Python*, Ruby*, Node*, Go*, SQL*, Oracle*, MongoDB*
+    - Heuristic detection: Directories with 3+ .exe or 5+ .dll files in root
     
     Category folders are created only when files are moved into them. Files already in the correct
     category folder are not moved. Document batching preserves existing numbered batch folders
     and starts new batches after the highest existing number.
+
 
 .LINK
     https://github.com/biokeyper/GNUDir-Cleaner
@@ -135,6 +142,12 @@ function Show-FriendlyError {
             "Cannot operate on: $Details`n" +
             "To protect your system, this script cannot run on Windows, Program Files, or the system drive root."
         }
+        "ApplicationDir" {
+            "Safety check failed: Application installation directory detected.`n" +
+            "Cannot operate on: $Details`n" +
+            "Running this script would break the installed application (Python, Node, databases, etc.).`n" +
+            "This directory appears to contain application executables or libraries."
+        }
         default {
             "Error: $Details"
         }
@@ -183,7 +196,7 @@ $SystemPaths = @(
 
 # Block system folders and their subdirectories
 foreach ($path in $SystemPaths) {
-    if ($path -and ($TargetDir -eq $path -or $TargetDir.StartsWith("$path\"))) {
+    if ($path -and ($TargetDir -eq $path -or $TargetDir.StartsWith("$path\", [System.StringComparison]::OrdinalIgnoreCase))) {
         Show-FriendlyError -ErrorType "SystemDir" -Details $TargetDir
     }
 }
@@ -198,6 +211,44 @@ try {
     }
 } catch {
     # Ignore errors here, if we can't get item we can't check it
+}
+
+# Block known application installation directories (only on system drive)
+$SystemDriveLetter = $SystemDrive.TrimEnd('\')
+if ($TargetDir.StartsWith($SystemDriveLetter, [System.StringComparison]::OrdinalIgnoreCase)) {
+    # Pattern matching for common application installations
+    $appPatterns = @(
+        '^C:\\Python',           # Python installations
+        '^C:\\Ruby',            # Ruby installations
+        '^C:\\Node',            # Node.js
+        '^C:\\Go',              # Go language
+        '^C:\\PerfLogs',        # Windows performance logs
+        '^C:\\ProgramData',     # Application data
+        '^C:\\Windows\.old',    # Old Windows installation
+        'SQL',                  # Any SQL variant (MySQL, PostgreSQL, MSSQL)
+        '^C:\\Oracle',          # Oracle database
+        '^C:\\MongoDB'          # MongoDB
+    )
+    
+    foreach ($pattern in $appPatterns) {
+        if ($TargetDir -match $pattern) {
+            Show-FriendlyError -ErrorType "ApplicationDir" -Details $TargetDir
+        }
+    }
+    
+    # Heuristic detection: Check for application installations by file analysis
+    # If directory has many executables or DLLs in root, it's likely an app install
+    try {
+        $rootExes = @(Get-ChildItem $TargetDir -Filter *.exe -File -ErrorAction SilentlyContinue)
+        $rootDlls = @(Get-ChildItem $TargetDir -Filter *.dll -File -ErrorAction SilentlyContinue)
+        
+        # If 3+ executables OR 5+ DLLs in root directory → likely an application
+        if ($rootExes.Count -ge 3 -or $rootDlls.Count -ge 5) {
+            Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected $($rootExes.Count) executables, $($rootDlls.Count) DLLs)"
+        }
+    } catch {
+        # If we can't enumerate files, skip heuristic check
+    }
 }
 
 # Categories

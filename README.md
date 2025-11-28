@@ -22,6 +22,34 @@ Simple file organizer for local directories. Categorizes files into folders by t
 
 ---
 
+## Safety Features
+
+The script includes **multi-layer protection** to prevent accidental damage to your system or applications:
+
+### 🛡️ Protected Directories
+
+**Automatically blocks execution on:**
+- **System directories**: `C:\Windows`, `C:\Program Files`, `C:\` root
+- **Application installations**: `C:\Python*`, `C:\Ruby*`, `C:\Node*`, `C:\Go*`
+- **Databases**: Anything matching `*SQL*`, `C:\Oracle*`, `C:\MongoDB*`
+- **System folders**: `C:\PerfLogs`, `C:\ProgramData`, `C:\Windows.old`
+
+### 🤖 Smart Heuristic Detection
+
+Even if an application isn't in the known patterns, the script detects installations by analyzing directory contents:
+- **3+ executable files** (.exe) in root directory → Blocked
+- **5+ library files** (.dll) in root directory → Blocked
+
+This prevents breaking unknown applications like custom databases, development tools, or proprietary software.
+
+### ✅ Always Safe
+
+User data directories are never blocked:
+- `C:\Users` and subdirectories
+- Non-system drives (`D:\`, `E:\`, `F:\`, etc.)
+
+---
+
 ## Platform Support
 
 - **Linux/macOS**: `gnudir.sh` (Bash script)

@@ -43,7 +43,9 @@ function Test-SafetyCheck {
 $tests = @(
     @{ Path = $env:SystemRoot; Desc = "Windows Directory" },
     @{ Path = $env:ProgramFiles; Desc = "Program Files" },
-    @{ Path = [System.IO.Path]::GetPathRoot($env:SystemRoot); Desc = "System Drive Root" }
+    @{ Path = [System.IO.Path]::GetPathRoot($env:SystemRoot); Desc = "System Drive Root" },
+    @{ Path = "C:\Python314"; Desc = "Python Installation (Pattern Match)" },
+    @{ Path = "C:\PerfLogs"; Desc = "Performance Logs (Pattern Match)" }
 )
 
 foreach ($test in $tests) {
