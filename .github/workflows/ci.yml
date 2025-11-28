@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev, gnu-win ]
+    branches: [ main, dev, gnu-win, godwin ]
   pull_request:
     branches: [ main ]
 
@@ -47,9 +47,13 @@ jobs:
           cd tests
           .\test_suite.ps1
 
+
       - name: Run Safety Tests
         shell: pwsh
         run: |
+          # Verifies script blocks protected directories:
+          # - System: C:\Windows, C:\Program Files, C:\ 
+          # - Applications: C:\Python*, C:\PerfLogs (pattern + heuristic detection)
           cd tests
           .\test_safety.ps1
 

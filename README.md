@@ -37,8 +37,10 @@ The script includes **multi-layer protection** to prevent accidental damage to y
 ### 🤖 Smart Heuristic Detection
 
 Even if an application isn't in the known patterns, the script detects installations by analyzing directory contents:
-- **3+ executable files** (.exe) in root directory → Blocked
-- **5+ library files** (.dll) in root directory → Blocked
+- **2+ different file types** (.exe, .dll, .msi, .sys, .bat, .cmd, .ps1) → Blocked
+- **1+ installer files** (.msi) → Blocked
+- **3+ executable files** (.exe) → Blocked
+- **5+ library files** (.dll) → Blocked
 
 This prevents breaking unknown applications like custom databases, development tools, or proprietary software.
 

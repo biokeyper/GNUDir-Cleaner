@@ -74,7 +74,7 @@
     The script automatically blocks execution on protected directories to prevent system damage:
     - System directories: C:\Windows, C:\Program Files, C:\ root
     - Application installations: Python*, Ruby*, Node*, Go*, SQL*, Oracle*, MongoDB*
-    - Heuristic detection: Directories with 3+ .exe or 5+ .dll files in root
+    - Heuristic detection: 2+ file types (.exe, .dll, .msi, .sys, .bat, .cmd, .ps1) OR 1+ .msi OR 3+ .exe OR 5+ .dll
     
     Category folders are created only when files are moved into them. Files already in the correct
     category folder are not moved. Document batching preserves existing numbered batch folders
@@ -237,18 +237,38 @@ if ($TargetDir.StartsWith($SystemDriveLetter, [System.StringComparison]::Ordinal
     }
     
     # Heuristic detection: Check for application installations by file analysis
-    # If directory has many executables or DLLs in root, it's likely an app install
+    # If directory has many executables, libraries, or installers, it's likely an app
     try {
-        $rootExes = @(Get-ChildItem $TargetDir -Filter *.exe -File -ErrorAction SilentlyContinue)
-        $rootDlls = @(Get-ChildItem $TargetDir -Filter *.dll -File -ErrorAction SilentlyContinue)
+        $fileTypes = @{
+            'exe' = @(Get-ChildItem $TargetDir -Filter *.exe -File -ErrorAction SilentlyContinue)
+            'dll' = @(Get-ChildItem $TargetDir -Filter *.dll -File -ErrorAction SilentlyContinue)
+            'msi' = @(Get-ChildItem $TargetDir -Filter *.msi -File -ErrorAction SilentlyContinue)
+            'sys' = @(Get-ChildItem $TargetDir -Filter *.sys -File -ErrorAction SilentlyContinue)
+            'bat' = @(Get-ChildItem $TargetDir -Filter *.bat -File -ErrorAction SilentlyContinue)
+            'cmd' = @(Get-ChildItem $TargetDir -Filter *.cmd -File -ErrorAction SilentlyContinue)
+            'ps1' = @(Get-ChildItem $TargetDir -Filter *.ps1 -File -ErrorAction SilentlyContinue)
+        }
         
-        # If 3+ executables OR 5+ DLLs in root directory → likely an application
-        if ($rootExes.Count -ge 3 -or $rootDlls.Count -ge 5) {
-            Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected $($rootExes.Count) executables, $($rootDlls.Count) DLLs)"
+        # Count how many different file types are present
+        $presentTypes = @($fileTypes.Keys | Where-Object { $fileTypes[$_].Count -gt 0 })
+        
+        # Block if multiple installation-related file types present (likely an app install)
+        if ($presentTypes.Count -ge 2) {
+            $typeList = $presentTypes -join ', '
+            Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected files: $typeList)"
+        }
+        
+        # Also block if high count of any single type (original logic)
+        if ($fileTypes['exe'].Count -ge 3 -or $fileTypes['dll'].Count -ge 5 -or $fileTypes['msi'].Count -ge 1) {
+            $exeCount = $fileTypes['exe'].Count
+            $dllCount = $fileTypes['dll'].Count
+            $msiCount = $fileTypes['msi'].Count
+            Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected $exeCount exe, $dllCount dll, $msiCount msi files)"
         }
     } catch {
         # If we can't enumerate files, skip heuristic check
     }
+
 }
 
 # Categories
