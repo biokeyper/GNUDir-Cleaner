@@ -19,6 +19,7 @@ Simple file organizer for local directories. Categorizes files into folders by t
 - Deletes empty directories after organizing (unless `--keep-empty` / `-KeepEmpty` is used)
 - Prints per-category counts and sizes and a total runtime/size summary
 - **Document batching**: Split large document folders into numbered subfolders (e.g., `doc/1`, `doc/2` with 100 files each)
+- **PDF Splitting**: Split large PDF documents into smaller chunks (requires `qpdf`).
 
 ---
 
@@ -80,6 +81,16 @@ chmod +x ./gnudir.sh
 ./gnudir.sh --recurse --docs-batch-size 100 ~/Documents
 ```
 
+**Example** — split a specific PDF by filename (searches in `doc/` folder):
+```bash
+./gnudir.sh --split-pdf-pages 100 --split-target "book.pdf" ~/Documents
+```
+
+**Example** — split a PDF by direct path:
+```bash
+./gnudir.sh --split-pdf-pages 100 --split-target "/path/to/mybook.pdf"
+```
+
 ### Windows
 
 ```powershell
@@ -121,6 +132,8 @@ cd GNUDir-Cleaner
 - `--exclude PATH`       Exclude a path from processing (can repeat)
 - `--keep-empty`         Do not delete empty directories after organizing
 - `--docs-batch-size N`  Split `doc/` into numbered subfolders with up to N files each (default: `0` = disabled)
+- `--split-pdf-pages N`  Split PDFs into chunks of N pages. Creates document-named folder with splits and backup/. (Requires `qpdf`)
+- `--split-target NAME`  Filename (case-sensitive) or path to PDF.  Auto-searches base dir if not in doc/. Prompts if not specified.
 - `--help`               Show this help and exit
 
 ### Windows (PowerShell)
@@ -207,3 +220,20 @@ This project is licensed under the GNU AFFERO GENERAL PUBLIC LICENSE Version 3 �
 ## VERSION
 
 0.0.0.7
+0.0.0.8 (Dev)
+
+## Branching Strategy & TODOs
+
+> [!NOTE]
+> This repository uses a split branching strategy for OS support:
+> - **godlin**: Linux/macOS changes (Bash script).
+> - **godwin**: Windows changes (PowerShell script).
+
+**Current Branch: godlin**
+This branch only implements changes for Linux/macOS (`gnudir.sh`). Any Windows-specific features should be implemented in the `godwin` branch.
+
+### TODO (Windows / godwin)
+- [ ] Implement PDF splitting in `gnudir.ps1` (mirroring `gnudir.sh` logic).
+    - Add `-SplitPdfPages <Int>` parameter.
+    - Use `qpdf` to split files.
+    - Move original files to `backup/` folder.
