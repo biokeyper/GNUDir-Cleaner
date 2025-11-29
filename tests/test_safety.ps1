@@ -34,22 +34,26 @@ function Run-Test {
     $lastExitCode = $LASTEXITCODE
     
     # Verify
+    $outputStr = $output -join "`n"
+    
     if ($ShouldFail) {
-        if ($lastExitCode -ne 0 -or $output -match "Safety check failed") {
+        if ($lastExitCode -ne 0 -or $outputStr -match "Safety check failed") {
             Write-Host " [PASS] (Blocked as expected)" -ForegroundColor Green
             return $true
         } else {
             Write-Host " [FAIL] (Should have blocked)" -ForegroundColor Red
-            Write-Host "Output: $output"
+            Write-Host "Exit Code: $lastExitCode"
+            Write-Host "Output: $outputStr"
             return $false
         }
     } else {
-        if ($lastExitCode -eq 0 -and $output -notmatch "Safety check failed") {
+        if ($lastExitCode -eq 0 -and $outputStr -notmatch "Safety check failed") {
             Write-Host " [PASS] (Allowed as expected)" -ForegroundColor Green
             return $true
         } else {
             Write-Host " [FAIL] (Blocked unexpectedly)" -ForegroundColor Red
-            Write-Host "Output: $output"
+            Write-Host "Exit Code: $lastExitCode"
+            Write-Host "Output: $outputStr"
             return $false
         }
     }

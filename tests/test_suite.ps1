@@ -4,6 +4,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
+$ScriptPath = Join-Path $PSScriptRoot "..\gnudir.ps1"
 
 # Setup test directory
 $TestDir = ".\test_gnudir_temp"
@@ -27,7 +28,7 @@ Write-Host "Created 7 test files" -ForegroundColor Green
 
 # Test 1: Basic categorization
 Write-Host "`n=== Test 1: Basic Categorization ===" -ForegroundColor Cyan
-& "..\gnudir.ps1" -TargetDir $TestDir
+& $ScriptPath -TargetDir $TestDir
 
 $passed = 0
 $failed = 0
@@ -99,7 +100,7 @@ Write-Host "`n=== Test 2: Document Batching ===" -ForegroundColor Cyan
 Write-Host "Created 150 test documents"
 
 # Run batching with size 50
-& "..\gnudir.ps1" -TargetDir $TestDir -DocsBatchSize 50
+& $ScriptPath -TargetDir $TestDir -DocsBatchSize 50
 
 # Check batches
 $batch1Count = (Get-ChildItem "$TestDir\doc\1" -File -ErrorAction SilentlyContinue | Measure-Object).Count
@@ -121,7 +122,7 @@ Remove-Item $TestDir -Recurse -Force
 New-Item -ItemType Directory -Path $TestDir | Out-Null
 New-Item -ItemType File -Path "$TestDir\test.pdf" -Force | Out-Null
 
-& "..\gnudir.ps1" -TargetDir $TestDir -DryRun
+& $ScriptPath -TargetDir $TestDir -DryRun
 
 if ((Test-Path "$TestDir\test.pdf") -and -not (Test-Path "$TestDir\doc")) {
     Write-Host "[PASS] Dry run did not move files" -ForegroundColor Green
