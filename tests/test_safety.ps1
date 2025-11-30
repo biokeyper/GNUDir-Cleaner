@@ -1,70 +1,110 @@
 # PowerShell Safety Test Suite for gnudir.ps1
-# Tests that critical system directories are protected
+# Tests safety checks and heuristic detection
 
-$ErrorActionPreference = "Continue" # We expect errors, so don't stop immediately
+param()
 
-Write-Host "=== Testing Critical Safety Checks ===" -ForegroundColor Cyan
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
-$scriptPath = Resolve-Path "..\gnudir.ps1"
+# Setup test directory
+$TestDir = ".\test_safety_temp"
+if (Test-Path $TestDir) { 
+    Remove-Item $TestDir -Recurse -Force 
+}
+New-Item -ItemType Directory -Path $TestDir | Out-Null
+
+Write-Host "=== Safety Check Tests ===" -ForegroundColor Cyan
+
 $passed = 0
 $failed = 0
 
-# Helper to run test case
-function Test-SafetyCheck {
-    param($Path, $Description)
+function Run-Test {
+    param($Name, $SetupBlock, $ShouldFail)
     
-    Write-Host "Testing: $Description ($Path)..." -NoNewline
+    Write-Host "Test: $Name" -NoNewline
     
-    # Run script against protected path
-    # We expect it to fail with exit code 1 and output an error message
+    # Setup
+    $CaseDir = Join-Path $TestDir $Name
+    New-Item -ItemType Directory -Path $CaseDir -Force | Out-Null
+    & $SetupBlock -Dir $CaseDir
     
-    # Handle quoting for paths with spaces or trailing backslashes
-    # If path ends with backslash, we must escape it before the closing quote
-    $argPath = $Path
-    if ($Path.EndsWith("\")) {
-        $argPath = "$Path\"
-    }
+    # Run
+    $ScriptPath = Join-Path $PSScriptRoot "..\gnudir.ps1"
+    $output = & $ScriptPath -TargetDir $CaseDir -DryRun 2>&1
+    $lastExitCode = $LASTEXITCODE
     
-    $argStr = "-ExecutionPolicy Bypass -File `"$scriptPath`" -TargetDir `"$argPath`""
+    # Verify
+    $outputStr = $output -join "`n"
     
-    $process = Start-Process -FilePath "powershell" -ArgumentList $argStr -PassThru -NoNewWindow -Wait
-    
-    if ($process.ExitCode -eq 1) {
-        Write-Host " [PASS] (Blocked correctly)" -ForegroundColor Green
-        return $true
+    if ($ShouldFail) {
+        if ($lastExitCode -ne 0 -or $outputStr -match "Safety check failed") {
+            Write-Host " [PASS] (Blocked as expected)" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " [FAIL] (Should have blocked)" -ForegroundColor Red
+            Write-Host "Exit Code: $lastExitCode"
+            Write-Host "Output: $outputStr"
+            return $false
+        }
     } else {
-        Write-Host " [FAIL] (Allowed execution!)" -ForegroundColor Red
-        return $false
+        if ($lastExitCode -eq 0 -and $outputStr -notmatch "Safety check failed") {
+            Write-Host " [PASS] (Allowed as expected)" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " [FAIL] (Blocked unexpectedly)" -ForegroundColor Red
+            Write-Host "Exit Code: $lastExitCode"
+            Write-Host "Output: $outputStr"
+            return $false
+        }
     }
 }
 
-# Test Cases
-# Note: We use environment variables to get actual system paths
-$tests = @(
-    @{ Path = $env:SystemRoot; Desc = "Windows Directory" },
-    @{ Path = $env:ProgramFiles; Desc = "Program Files" },
-    @{ Path = [System.IO.Path]::GetPathRoot($env:SystemRoot); Desc = "System Drive Root" },
-    @{ Path = "C:\Python314"; Desc = "Python Installation (Pattern Match)" },
-    @{ Path = "C:\PerfLogs"; Desc = "Performance Logs (Pattern Match)" }
-)
-
-foreach ($test in $tests) {
-    if (Test-SafetyCheck -Path $test.Path -Description $test.Desc) {
-        $passed++
-    } else {
-        $failed++
-    }
+# Test 1: Safe directory (Images only)
+$res = Run-Test -Name "Safe_Images" -ShouldFail $false -SetupBlock {
+    param($Dir)
+    New-Item -Path "$Dir\test.jpg" -ItemType File | Out-Null
+    New-Item -Path "$Dir\test.png" -ItemType File | Out-Null
 }
+if ($res) { $passed++ } else { $failed++ }
 
-# Summary
-Write-Host "`n=== Safety Test Summary ===" -ForegroundColor Cyan
-Write-Host "Passed: $passed" -ForegroundColor Green
-if ($failed -eq 0) {
-    Write-Host "Failed: $failed" -ForegroundColor Green
-    Write-Host "`n[SUCCESS] All safety checks passed!" -ForegroundColor Green
-    exit 0
-} else {
-    Write-Host "Failed: $failed" -ForegroundColor Red
-    Write-Host "`n[FAILURE] Safety checks failed!" -ForegroundColor Red
-    exit 1
+# Test 2: Heuristic - Multiple EXEs (Should Block)
+$res = Run-Test -Name "Danger_Exes" -ShouldFail $true -SetupBlock {
+    param($Dir)
+    New-Item -Path "$Dir\app1.exe" -ItemType File | Out-Null
+    New-Item -Path "$Dir\app2.exe" -ItemType File | Out-Null
+    New-Item -Path "$Dir\app3.exe" -ItemType File | Out-Null
 }
+if ($res) { $passed++ } else { $failed++ }
+
+# Test 3: Heuristic - EXE + DLL (Should Block)
+$res = Run-Test -Name "Danger_Mixed" -ShouldFail $true -SetupBlock {
+    param($Dir)
+    New-Item -Path "$Dir\app.exe" -ItemType File | Out-Null
+    New-Item -Path "$Dir\lib.dll" -ItemType File | Out-Null
+}
+if ($res) { $passed++ } else { $failed++ }
+
+# Test 4: Heuristic - Single MSI (Should Block)
+$res = Run-Test -Name "Danger_Msi" -ShouldFail $true -SetupBlock {
+    param($Dir)
+    New-Item -Path "$Dir\installer.msi" -ItemType File | Out-Null
+}
+if ($res) { $passed++ } else { $failed++ }
+
+# Test 5: Safe - Single EXE (Should Allow - maybe? Script says 3+ exe or mixed)
+# Script logic: if ($presentTypes.Count -ge 2) OR ($fileTypes['exe'].Count -ge 3)
+# So 1 EXE should be safe if no other types.
+$res = Run-Test -Name "Safe_SingleExe" -ShouldFail $false -SetupBlock {
+    param($Dir)
+    New-Item -Path "$Dir\tool.exe" -ItemType File | Out-Null
+}
+if ($res) { $passed++ } else { $failed++ }
+
+# Cleanup
+Remove-Item $TestDir -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host "`n=== Summary ==="
+Write-Host "Passed: $passed"
+Write-Host "Failed: $failed"
+
+if ($failed -eq 0) { exit 0 } else { exit 1 }

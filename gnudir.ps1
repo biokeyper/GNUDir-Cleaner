@@ -235,40 +235,39 @@ if ($TargetDir.StartsWith($SystemDriveLetter, [System.StringComparison]::Ordinal
             Show-FriendlyError -ErrorType "ApplicationDir" -Details $TargetDir
         }
     }
-    
-    # Heuristic detection: Check for application installations by file analysis
-    # If directory has many executables, libraries, or installers, it's likely an app
-    try {
-        $fileTypes = @{
-            'exe' = @(Get-ChildItem $TargetDir -Filter *.exe -File -ErrorAction SilentlyContinue)
-            'dll' = @(Get-ChildItem $TargetDir -Filter *.dll -File -ErrorAction SilentlyContinue)
-            'msi' = @(Get-ChildItem $TargetDir -Filter *.msi -File -ErrorAction SilentlyContinue)
-            'sys' = @(Get-ChildItem $TargetDir -Filter *.sys -File -ErrorAction SilentlyContinue)
-            'bat' = @(Get-ChildItem $TargetDir -Filter *.bat -File -ErrorAction SilentlyContinue)
-            'cmd' = @(Get-ChildItem $TargetDir -Filter *.cmd -File -ErrorAction SilentlyContinue)
-            'ps1' = @(Get-ChildItem $TargetDir -Filter *.ps1 -File -ErrorAction SilentlyContinue)
-        }
-        
-        # Count how many different file types are present
-        $presentTypes = @($fileTypes.Keys | Where-Object { $fileTypes[$_].Count -gt 0 })
-        
-        # Block if multiple installation-related file types present (likely an app install)
-        if ($presentTypes.Count -ge 2) {
-            $typeList = $presentTypes -join ', '
-            Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected files: $typeList)"
-        }
-        
-        # Also block if high count of any single type (original logic)
-        if ($fileTypes['exe'].Count -ge 3 -or $fileTypes['dll'].Count -ge 5 -or $fileTypes['msi'].Count -ge 1) {
-            $exeCount = $fileTypes['exe'].Count
-            $dllCount = $fileTypes['dll'].Count
-            $msiCount = $fileTypes['msi'].Count
-            Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected $exeCount exe, $dllCount dll, $msiCount msi files)"
-        }
-    } catch {
-        # If we can't enumerate files, skip heuristic check
-    }
+}
 
+# Heuristic detection: Check for application installations by file analysis
+# If directory has many executables, libraries, or installers, it's likely an app
+try {
+    $fileTypes = @{
+        'exe' = @(Get-ChildItem $TargetDir -Filter *.exe -File -ErrorAction SilentlyContinue)
+        'dll' = @(Get-ChildItem $TargetDir -Filter *.dll -File -ErrorAction SilentlyContinue)
+        'msi' = @(Get-ChildItem $TargetDir -Filter *.msi -File -ErrorAction SilentlyContinue)
+        'sys' = @(Get-ChildItem $TargetDir -Filter *.sys -File -ErrorAction SilentlyContinue)
+        'bat' = @(Get-ChildItem $TargetDir -Filter *.bat -File -ErrorAction SilentlyContinue)
+        'cmd' = @(Get-ChildItem $TargetDir -Filter *.cmd -File -ErrorAction SilentlyContinue)
+        'ps1' = @(Get-ChildItem $TargetDir -Filter *.ps1 -File -ErrorAction SilentlyContinue)
+    }
+    
+    # Count how many different file types are present
+    $presentTypes = @($fileTypes.Keys | Where-Object { $fileTypes[$_].Count -gt 0 })
+    
+    # Block if multiple installation-related file types present (likely an app install)
+    if ($presentTypes.Count -ge 2) {
+        $typeList = $presentTypes -join ', '
+        Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected files: $typeList)"
+    }
+    
+    # Also block if high count of any single type (original logic)
+    if ($fileTypes['exe'].Count -ge 3 -or $fileTypes['dll'].Count -ge 5 -or $fileTypes['msi'].Count -ge 1) {
+        $exeCount = $fileTypes['exe'].Count
+        $dllCount = $fileTypes['dll'].Count
+        $msiCount = $fileTypes['msi'].Count
+        Show-FriendlyError -ErrorType "ApplicationDir" -Details "$TargetDir (detected $exeCount exe, $dllCount dll, $msiCount msi files)"
+    }
+} catch {
+    # If we can't enumerate files, skip heuristic check
 }
 
 # Categories
@@ -524,3 +523,5 @@ if ($LogFile) {
         "CATEGORY,$c,$bytes,$count,$hr" | Out-File -FilePath $LogFile -Append -Encoding UTF8
     }
 }
+
+exit 0
