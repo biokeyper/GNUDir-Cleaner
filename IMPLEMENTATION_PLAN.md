@@ -1,56 +1,52 @@
-# Safety Checks Implementation Plan
+# Safety Checks Implementation Plan - Linux (godlin)
 
 ## Goal Description
-Implement robust safety checks in `gnudir.ps1` to prevent accidental reorganization of sensitive system directories (Windows, Program Files) and application directories (containing executables, DLLs, etc.). This ensures the script doesn't break installed software or the OS.
+Implement robust safety checks in `gnudir.sh` (Linux version) to prevent accidental reorganization of sensitive system directories and application installations. This mirrors the safety features already implemented in the Windows version (`gnudir.ps1`).
 
 ## User Review Required
 > [!IMPORTANT]
-> This change will prevent the script from running on any directory that looks like an application installation. This might affect users trying to organize portable app folders if they contain mixed content.
+> This change will prevent the script from running on system directories and application installations. This protects against accidental damage to the OS and installed software.
 
 ## Proposed Changes
 
 ### Script Logic
-#### [MODIFY] [gnudir.ps1](gnudir.ps1)
-- Add a `Test-Safety` function or block at the beginning.
-- **System Checks**:
-    - Reject if path is root drive (e.g., `C:\`).
-    - Reject if path contains `Windows`, `Program Files`, `Program Files (x86)`, `ProgramData`, `PerfLogs`.
-- **Heuristic Checks**:
-    - Scan for "danger" markers in the top level of the target directory: `*.exe`, `*.dll`, `*.sys`, `*.msi`.
-    - If found, abort with a specific error message.
-    - Allow override with a `-Force` or `-Unsafe` switch? (Maybe not for now, stick to strict safety).
+#### [MODIFY] [gnudir.sh](file:///d:/dev/gd/gnudir.sh)
+- Extend existing safety checks beyond just rejecting root `/`.
+- **System Directory Checks**:
+    - Reject critical system paths: `/bin`, `/boot`, `/dev`, `/etc`, `/lib`, `/lib64`, `/opt`, `/proc`, `/root`, `/sbin`, `/sys`, `/usr`, `/var`
+    - Reject subdirectories of system paths (e.g., `/usr/bin`, `/etc/systemd`)
+- **Application Directory Pattern Matching**:
+    - Common app install locations: `/opt/*`, `/usr/local/*` (if containing apps)
+    - Language runtimes: paths containing `python`, `node`, `ruby`, `go`
+    - Databases: paths containing `mysql`, `postgres`, `mongodb`, `redis`
+- **Heuristic Detection**:
+    - Scan for ELF executables using `file` command or check for executable bit + binary content
+    - Check for shared libraries (`.so`, `.so.*`)
+    - Check for package manager files (`.deb`, `.rpm`, `.AppImage`)
+    - Block if 2+ binary types detected OR 3+ executables OR 5+ libraries OR 1+ package file
 
 ### Tests
-#### [NEW] [tests/test_safety.ps1](tests/test_safety.ps1)
-- Create a specific test suite for safety checks.
+#### [NEW] [tests/test_safety.sh](file:///d:/dev/gd/tests/test_safety.sh)
+- Create Bash test suite for Linux safety checks
 - Test cases:
-    - Mock system directories (requires careful mocking or using non-system paths that trigger the name check).
-    - Create a dummy app directory with `.exe` and `.dll` files.
-    - Verify script refuses to run.
-    - Verify script runs on safe directories.
+    - Safe directories (images only) - should allow
+    - Multiple executables - should block
+    - Mixed executables + libraries - should block
+    - Package files (.deb, .AppImage) - should block
+    - Single executable - should allow
 
 ### CI
-#### [MODIFY] [.github/workflows/ci.yml](.github/workflows/ci.yml)
-- Add a step to run `tests/test_safety.ps1`.
+#### [MODIFY] [.github/workflows/ci.yml](file:///d:/dev/gd/.github/workflows/ci.yml)
+- Add step to run `tests/test_safety.sh` in the `linux-tests` job
 
 ## Verification Plan
 
 ### Automated Tests
-- Run `tests/test_safety.ps1` locally.
-- Run full `tests/test_suite.ps1` to ensure no regressions.
-- Run `tests/test_suite.sh` on WSL/Linux to verify Linux script fixes.
+- Run `./tests/test_safety.sh` locally on Linux
+- Run full `./tests/test_suite.sh` to ensure no regressions
 
 ### Manual Verification
-- Create a folder `C:\Temp\FakeApp` with a `fake.exe`.
-- Run `.\gnudir.ps1 -TargetDir C:\Temp\FakeApp -DryRun`.
-- Run `./gnudir.sh --dry-run /tmp/FakeApp` (on Linux/WSL).
-- Expect error in both cases.
-
-## Linux Parity & Fixes
-#### [MODIFY] [gnudir.sh](gnudir.sh)
-- **Fix Corruption**: Remove the appended duplicate/legacy code at the end of the file (lines 358+).
-- **Safety Checks**: Implement the same system and heuristic checks as Windows:
-    - Reject root `/`.
-    - Reject if path contains `bin`, `boot`, `dev`, `etc`, `lib`, `proc`, `sbin`, `sys`, `usr`, `var` (Linux system dirs).
-    - Heuristic check for `*.o`, `*.so`, `*.bin` (executables/libraries) in top level.
-
+- Create test directory: `mkdir -p /tmp/fake_app`
+- Add fake executables: `touch /tmp/fake_app/{app1,app2,app3}; chmod +x /tmp/fake_app/*`
+- Run: `./gnudir.sh /tmp/fake_app --dry-run`
+- Expect: Safety check failure with clear error message
